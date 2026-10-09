@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { ShieldCheck } from "lucide-react";
 import PageContainer from "../components/PageContainer.jsx";
@@ -20,6 +20,9 @@ export default function Review() {
     facts,
     draft,
     applicantDetails,
+    image_url,
+    location,
+    vision_result,
     update,
     rememberCaseNumber,
   } = useRequest();
@@ -86,7 +89,12 @@ export default function Review() {
         original_request: originalText,
         request_type: analysis.type,
         category: analysis.category,
-        extracted_facts: facts,
+        extracted_facts: {
+          ...facts,
+          image_url,
+          gps_location: location,
+          vision_result,
+        },
         draft: finalDraft,
         applicant_details: details,
       });

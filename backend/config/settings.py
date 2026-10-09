@@ -47,7 +47,7 @@ class Settings(BaseSettings):
     )
 
     groq_vision_model: str = (
-        "qwen/qwen3.6-27b"
+        "qwen/qwen3.8-27b"
     )
 
     # =========================================================

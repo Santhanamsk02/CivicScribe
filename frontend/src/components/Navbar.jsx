@@ -17,8 +17,22 @@ export default function Navbar() {
   const [caseNumber, setCaseNumber] = useState("");
   const [tracking, setTracking] = useState(false);
   const [trackError, setTrackError] = useState(null);
+  const [role, setRole] = useState(() => localStorage.getItem("userRole"));
+  
   const inputRef = useRef(null);
   const navigate = useNavigate();
+
+  useEffect(() => {
+    const handleStorageChange = () => setRole(localStorage.getItem("userRole"));
+    window.addEventListener("storage", handleStorageChange);
+    return () => window.removeEventListener("storage", handleStorageChange);
+  }, []);
+
+  const handleLogout = () => {
+    localStorage.removeItem("userRole");
+    setRole(null);
+    navigate("/login");
+  };
 
   const linkClass = ({ isActive }) =>
     `text-[14px] font-medium transition-colors duration-150 ${
@@ -62,7 +76,7 @@ export default function Navbar() {
       const data = await getCase(query);
       if (data && data.case_number) {
         closeTrackModal();
-        navigate(`/case/${data.case_number}`);
+        navigate(role === "OFFICER" ? `/officer/cases/${data.case_number}` : `/case/${data.case_number}`);
       } else {
         setTrackError("Case not found. Please check the case number.");
       }
@@ -72,6 +86,14 @@ export default function Navbar() {
       setTracking(false);
     }
   };
+
+  const navLinks = role === "OFFICER" 
+    ? [ { to: "/officer", label: "Dashboard" }, { to: "/officer/settings", label: "Settings" } ]
+    : [
+        { to: "/", label: "Home" },
+        { to: "/cases", label: "My Cases" },
+        { to: "/how-it-works", label: "How It Works" },
+      ];
 
   return (
     <header className="sticky top-0 z-40 border-b border-line bg-paper/95 backdrop-blur-sm">
@@ -86,14 +108,14 @@ export default function Navbar() {
         </Link>
 
         <nav aria-label="Primary" className="hidden items-center gap-7 md:flex">
-          {NAV_LINKS.map((link) => (
+          {navLinks.map((link) => (
             <NavLink key={link.to} to={link.to} className={linkClass} end={link.to === "/"}>
               {link.label}
             </NavLink>
           ))}
         </nav>
 
-        <div className="hidden md:block">
+        <div className="hidden md:flex items-center gap-3">
           <button
             onClick={openTrackModal}
             className="inline-flex items-center gap-2 rounded-md border border-line bg-white px-4 py-2 text-[14px] font-medium text-ink-900 hover:border-ink-500 transition"
@@ -101,6 +123,21 @@ export default function Navbar() {
             <Search size={14} aria-hidden="true" />
             Track Case
           </button>
+          
+          {role ? (
+            <button
+              onClick={handleLogout}
+              className="text-[13px] font-medium text-ink-500 hover:text-ink-900 underline underline-offset-2"
+            >
+              Logout
+            </button>
+          ) : (
+            <Link to="/login">
+              <Button className="px-4 py-2 text-[13px]">
+                Login
+              </Button>
+            </Link>
+          )}
         </div>
 
         <button
@@ -119,7 +156,7 @@ export default function Navbar() {
           className="border-t border-line bg-paper px-4 py-3 md:hidden"
         >
           <ul className="flex flex-col gap-1">
-            {NAV_LINKS.map((link) => (
+            {navLinks.map((link) => (
               <li key={link.to}>
                 <NavLink
                   to={link.to}
@@ -142,6 +179,24 @@ export default function Navbar() {
               >
                 Track Case
               </button>
+            </li>
+            
+            <li className="mt-2 border-t border-line pt-2">
+              {role ? (
+                <button
+                  onClick={() => {
+                    handleLogout();
+                    setOpen(false);
+                  }}
+                  className="block w-full rounded-md px-3 py-2.5 text-left text-[15px] font-medium text-danger"
+                >
+                  Logout
+                </button>
+              ) : (
+                <Link to="/login" onClick={() => setOpen(false)}>
+                  <Button className="mt-2 w-full text-center">Login</Button>
+                </Link>
+              )}
             </li>
           </ul>
         </nav>

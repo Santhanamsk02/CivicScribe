@@ -52,6 +52,20 @@ export function analyzeRequest(text) {
   });
 }
 
+export function analyzeRequestWithImage(text, imageBlob, latitude, longitude) {
+  const formData = new FormData();
+  formData.append("text", text);
+  if (latitude) formData.append("latitude", latitude);
+  if (longitude) formData.append("longitude", longitude);
+  formData.append("file", imageBlob, "capture.jpg");
+
+  return request("/analyze_with_image", {
+    method: "POST",
+    headers: {}, // fetch will automatically set the correct Content-Type with boundary for FormData
+    body: formData,
+  });
+}
+
 export function extractFacts(text) {
   return request("/extract-facts", {
     method: "POST",
@@ -105,6 +119,26 @@ export function updateCaseStatus(caseNumber, status) {
     method: "PATCH",
     body: JSON.stringify({ status }),
   });
+}
+
+export async function verifyAndResolveCase(caseNumber, imageFile) {
+  const formData = new FormData();
+  formData.append("file", imageFile);
+
+  const res = await fetch(`${API_BASE_URL}/cases/${caseNumber}/resolve`, {
+    method: "POST",
+    body: formData,
+  });
+
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({}));
+    throw new ApiError(
+      res.status,
+      errorData.detail || errorData.message || "An unexpected error occurred"
+    );
+  }
+
+  return await res.json();
 }
 
 export { ApiError };

@@ -11,7 +11,7 @@ import { useRequest } from "../context/RequestContext.jsx";
 import { extractFacts, ApiError } from "../api/client.js";
 
 export default function Analyze() {
-  const { originalText, analysis, facts, update } = useRequest();
+  const { originalText, analysis, facts, image_url, vision_result, location, update } = useRequest();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const navigate = useNavigate();
@@ -80,6 +80,49 @@ export default function Analyze() {
         </div>
       </Card>
 
+      {image_url && (
+        <Card className="mt-6">
+          <p className="text-[13px] font-medium text-ink-500 mb-2">Image Evidence</p>
+          <img 
+            src={image_url} 
+            alt="Evidence" 
+            className="w-full rounded-md object-cover border border-line" 
+            style={{maxHeight: "300px"}} 
+          />
+          
+          {vision_result && (
+            <div className="mt-4 border-t border-line pt-4 flex flex-col gap-3">
+              <div>
+                <p className="text-[13px] font-medium text-ink-500">AI Severity Assessment</p>
+                <div className="mt-1 flex items-center gap-2">
+                  <Badge tone={vision_result.severity_score > 70 ? "negative" : "neutral"}>
+                    Score: {vision_result.severity_score}/100
+                  </Badge>
+                </div>
+                <p className="mt-2 text-[14px] text-ink-700">{vision_result.severity_reason}</p>
+              </div>
+              
+              <div>
+                <p className="text-[13px] font-medium text-ink-500">Visual Evidence Status</p>
+                <div className="mt-1">
+                  <Badge tone={vision_result.relevance === "relevant" ? "positive" : "neutral"}>
+                    {vision_result.relevance.replace("_", " ")}
+                  </Badge>
+                </div>
+                <p className="mt-1 text-[13px] text-ink-500">{vision_result.relevance_reason}</p>
+              </div>
+            </div>
+          )}
+
+          {location && location.latitude && (
+             <div className="mt-4 border-t border-line pt-4">
+                <p className="text-[13px] font-medium text-ink-500">Location</p>
+                <p className="mt-1 text-[14px] text-ink-700">Lat: {Number(location.latitude).toFixed(5)}, Lng: {Number(location.longitude).toFixed(5)}</p>
+             </div>
+          )}
+        </Card>
+      )}
+
       {loading && (
         <div className="mt-6">
           <LoadingState message="Organizing the information..." />
@@ -97,7 +140,13 @@ export default function Analyze() {
           <Button variant="secondary" onClick={() => navigate("/start")}>
             Back
           </Button>
-          <Button onClick={handleContinue}>Continue</Button>
+          <Button 
+            onClick={handleContinue} 
+            disabled={vision_result && vision_result.relevance === "irrelevant"}
+            title={vision_result && vision_result.relevance === "irrelevant" ? "Please provide valid evidence of a civic issue" : ""}
+          >
+            Continue
+          </Button>
         </div>
       )}
     </PageContainer>

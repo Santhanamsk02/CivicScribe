@@ -1,36 +1,36 @@
-# Environment variables
-.env
-
-# Virtual environment
-venv/
-.venv/
-
-# Python
+# Backend / Python
 __pycache__/
 *.py[cod]
 *$py.class
+*.so
+.Python
+backend/venv/
+backend/.env
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
 
-# Testing
-.pytest_cache/
-.coverage
-htmlcov/
+# Frontend / Node
+node_modules/
+dist/
+dist-ssr/
+*.local
+.npm/
 
-# IDE
+# IDE / OS
 .vscode/
 .idea/
-
-# macOS
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
 .DS_Store
+Thumbs.db
 
-# Logs
+# Other
+backend/data/*.json
+backend/data/*.log
 *.log
-
-# Temporary files
-tmp/
-temp/
-
-# Uploaded files
-uploads/
-
-# Generated files
-generated/

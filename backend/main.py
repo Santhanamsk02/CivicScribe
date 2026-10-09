@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
-from config import APP_NAME
+from config.settings import settings
 from routes.health import router as health_router
 from routes.analyze import router as analyze_router
 from routes.facts import router as facts_router
@@ -12,9 +12,10 @@ from routes.missing_info import router as missing_info_router
 from routes.draft import router as draft_router
 from routes.cases import router as cases_router
 from routes.validation import router as validation_router
+from routes.profile import router as profile_router
 
 app = FastAPI(
-    title=APP_NAME,
+    title=settings.app_name,
     description="AI-assisted RTI and Grievance drafting system",
     version="1.0.0"
 )
@@ -59,6 +60,11 @@ app.include_router(
 
 app.include_router(
     validation_router,
+    prefix="/api"
+)
+
+app.include_router(
+    profile_router,
     prefix="/api"
 )
 

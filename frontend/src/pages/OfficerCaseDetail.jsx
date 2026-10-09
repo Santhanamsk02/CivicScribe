@@ -1,5 +1,6 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
+import Webcam from "react-webcam";
 import {
   ArrowLeft,
   CheckCircle2,
@@ -13,6 +14,7 @@ import {
   Building2,
   MapPin,
   Calendar,
+  Camera
 } from "lucide-react";
 import PageContainer from "../components/PageContainer.jsx";
 import Card from "../components/Card.jsx";
@@ -20,7 +22,18 @@ import Badge from "../components/Badge.jsx";
 import Button from "../components/Button.jsx";
 import LoadingState from "../components/LoadingState.jsx";
 import ErrorState from "../components/ErrorState.jsx";
-import { getCase, updateCaseStatus, ApiError } from "../api/client.js";
+import { getCase, updateCaseStatus, verifyAndResolveCase, ApiError } from "../api/client.js";
+import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
+import "leaflet/dist/leaflet.css";
+import L from "leaflet";
+
+// Fix Leaflet's default icon path issues with Webpack/Vite
+delete L.Icon.Default.prototype._getIconUrl;
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png",
+  iconUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png",
+  shadowUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png",
+});
 
 const STATUS_STAGES = [
   { id: "DRAFT", label: "Draft", desc: "Case created but not yet approved." },
@@ -75,6 +88,27 @@ function getStatusBadgeTone(status) {
   }
 }
 
+function getDistanceFromLatLonInKm(lat1, lon1, lat2, lon2) {
+  const R = 6371; // Radius of the earth in km
+  const dLat = (lat2 - lat1) * (Math.PI / 180);
+  const dLon = (lon2 - lon1) * (Math.PI / 180);
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * (Math.PI / 180)) * Math.cos(lat2 * (Math.PI / 180)) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c; 
+}
+
+function dataURLtoFile(dataurl, filename) {
+  let arr = dataurl.split(','), mime = arr[0].match(/:(.*?);/)[1],
+      bstr = atob(arr[1]), n = bstr.length, u8arr = new Uint8Array(n);
+  while(n--){
+      u8arr[n] = bstr.charCodeAt(n);
+  }
+  return new File([u8arr], filename, {type:mime});
+}
+
 export default function OfficerCaseDetail() {
   const { caseNumber } = useParams();
   const navigate = useNavigate();
@@ -88,9 +122,54 @@ export default function OfficerCaseDetail() {
   const [updating, setUpdating] = useState(false);
   const [successMessage, setSuccessMessage] = useState(null);
   const [updateError, setUpdateError] = useState(null);
+  const [resolveImage, setResolveImage] = useState(null);
 
   // Toggles for long sections
   const [showApplication, setShowApplication] = useState(true);
+
+  // Capture mode state
+  const [captureMode, setCaptureMode] = useState("upload"); // "upload" | "camera"
+  const webcamRef = useRef(null);
+
+  const captureAndVerifyLocation = async () => {
+    setUpdating(true);
+    setUpdateError(null);
+    try {
+      const imageSrc = webcamRef.current.getScreenshot();
+      if (!imageSrc) throw new Error("Could not capture image from webcam.");
+
+      let lat = null, lng = null;
+      try {
+        const pos = await new Promise((resolve, reject) => {
+          navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 });
+        });
+        lat = pos.coords.latitude;
+        lng = pos.coords.longitude;
+      } catch (err) {
+        throw new Error("Could not access your location. Please enable location services to use the live camera verification.");
+      }
+
+      const caseLat = record.extracted_facts?.gps_location?.latitude || record.extracted_facts?.location?.latitude;
+      const caseLng = record.extracted_facts?.gps_location?.longitude || record.extracted_facts?.location?.longitude;
+
+      if (caseLat && caseLng) {
+        const dist = getDistanceFromLatLonInKm(lat, lng, Number(caseLat), Number(caseLng));
+        if (dist > 0.5) { // 500 meters threshold
+          throw new Error(`Location mismatch: You are ${Math.round(dist * 1000)}m away from the reported issue location. You must be on-site (within 500m) to use the live camera.`);
+        }
+      }
+
+      const file = dataURLtoFile(imageSrc, "live_resolution.jpg");
+      setResolveImage(file);
+      setSuccessMessage("Live image captured and location verified.");
+      setTimeout(() => setSuccessMessage(null), 3000);
+      setCaptureMode("upload"); // Switch back so user sees the file is attached
+    } catch (err) {
+      setUpdateError(err.message || "Failed to capture and verify location.");
+    } finally {
+      setUpdating(false);
+    }
+  };
 
   const fetchCaseDetails = async () => {
     setLoading(true);
@@ -119,18 +198,34 @@ export default function OfficerCaseDetail() {
 
   const handleStatusUpdate = async () => {
     if (!selectedStatus || selectedStatus === record?.status) return;
+    
+    if (selectedStatus === "RESOLVED" && !resolveImage) {
+      setUpdateError("Please upload a resolution image to mark this case as resolved.");
+      return;
+    }
+
     setUpdating(true);
     setSuccessMessage(null);
     setUpdateError(null);
 
     try {
-      const result = await updateCaseStatus(caseNumber, selectedStatus);
+      if (selectedStatus === "RESOLVED") {
+        const result = await verifyAndResolveCase(caseNumber, resolveImage);
+        if (!result.success) {
+          setUpdateError(`AI Verification Failed: ${result.reason}`);
+          setUpdating(false);
+          return;
+        }
+      } else {
+        await updateCaseStatus(caseNumber, selectedStatus);
+      }
 
       // Verify that status update succeeded by re-fetching fresh case state
       const refreshed = await getCase(caseNumber);
       setRecord(refreshed);
       setSelectedStatus(refreshed.status || selectedStatus);
       setSuccessMessage("Case status updated successfully.");
+      setResolveImage(null); // Reset image after success
 
       // Auto-hide success alert after 4 seconds
       setTimeout(() => {
@@ -264,6 +359,105 @@ export default function OfficerCaseDetail() {
               {record.original_request || "No original text available."}
             </div>
           </Card>
+
+          {/* Visual Evidence */}
+          {(facts.image_url || (facts.gps_location?.latitude && facts.gps_location?.longitude) || (facts.location?.latitude && facts.location?.longitude)) && (
+            <Card>
+              <div className="flex items-center gap-2 border-b border-line pb-3">
+                <MapPin size={16} className="text-accent" />
+                <h2 className="text-[15px] font-semibold text-ink-900">
+                  Visual Evidence & Location
+                </h2>
+              </div>
+              
+              <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                {facts.image_url && (
+                  <div>
+                    <p className="text-[12px] font-medium uppercase tracking-wide text-ink-400 mb-2">
+                      Photographic Evidence
+                    </p>
+                    <img src={facts.image_url} alt="Evidence" className="w-full rounded-md border border-line" />
+                    {facts.vision_result && (
+                      <div className="mt-2 text-[13px] text-ink-700">
+                        <span className="font-semibold block text-ink-900">AI Assessment:</span> 
+                        {facts.vision_result.relevance === "relevant" ? "Relevant" : "Possibly Relevant"} 
+                        {facts.vision_result.severity_score && <span className="ml-2 font-medium">| Severity: {facts.vision_result.severity_score}/10</span>}
+                        {facts.vision_result.image_description && <p className="mt-1 italic text-ink-500 text-[12px]">{facts.vision_result.image_description}</p>}
+                      </div>
+                    )}
+                  </div>
+                )}
+                
+                {(facts.gps_location?.latitude || facts.location?.latitude) && (facts.gps_location?.longitude || facts.location?.longitude) && (() => {
+                  const lat = facts.gps_location?.latitude || facts.location?.latitude;
+                  const lng = facts.gps_location?.longitude || facts.location?.longitude;
+                  return (
+                    <div className={!facts.image_url ? "sm:col-span-2" : ""}>
+                      <p className="text-[12px] font-medium uppercase tracking-wide text-ink-400 mb-2">
+                        Geotagged Location
+                      </p>
+                      <div className="h-[250px] w-full rounded-md border border-line overflow-hidden z-0 relative">
+                        {typeof window !== "undefined" && (
+                          <MapContainer center={[Number(lat), Number(lng)]} zoom={15} style={{ height: "100%", width: "100%", zIndex: 10 }}>
+                            <TileLayer
+                              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                              attribution='&copy; OpenStreetMap'
+                            />
+                            <Marker position={[Number(lat), Number(lng)]}>
+                              <Popup>Reported Location</Popup>
+                            </Marker>
+                          </MapContainer>
+                        )}
+                      </div>
+                      <p className="mt-1 text-[12px] text-ink-500 text-right">
+                        Lat: {Number(lat).toFixed(5)}, Lng: {Number(lng).toFixed(5)}
+                      </p>
+                    </div>
+                  );
+                })()}
+              </div>
+            </Card>
+          )}
+
+          {/* Resolution Proof */}
+          {facts.resolved_image_url && (
+            <Card className="border-success/30 bg-success/5">
+              <div className="flex items-center gap-2 border-b border-success/20 pb-3">
+                <CheckCircle2 size={16} className="text-success" />
+                <h2 className="text-[15px] font-semibold text-ink-900">
+                  Resolution Proof
+                </h2>
+              </div>
+              
+              <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                <div>
+                  <p className="text-[12px] font-medium uppercase tracking-wide text-ink-400 mb-2">
+                    Resolved Status Photo
+                  </p>
+                  <img src={facts.resolved_image_url} alt="Resolution" className="w-full rounded-md border border-line" />
+                </div>
+                
+                {facts.resolution_verification && (
+                  <div>
+                    <p className="text-[12px] font-medium uppercase tracking-wide text-ink-400 mb-2">
+                      AI Verification
+                    </p>
+                    <div className="rounded border border-success/30 bg-white p-3 text-[13px] leading-relaxed text-ink-700">
+                      <p className="font-semibold text-success mb-1 flex items-center gap-1">
+                        <CheckCircle2 size={14} /> Verified Resolved
+                      </p>
+                      <p className="mt-1">{facts.resolution_verification.reason}</p>
+                      {facts.resolution_verification.confidence_score && (
+                        <p className="mt-2 text-[11px] text-ink-400">
+                          Confidence: {facts.resolution_verification.confidence_score}%
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </Card>
+          )}
 
           {/* Extracted Facts */}
           <Card>
@@ -432,6 +626,65 @@ export default function OfficerCaseDetail() {
                   </option>
                 ))}
               </select>
+
+              {selectedStatus === "RESOLVED" && currentStatus !== "RESOLVED" && (
+                <div className="mt-4 p-3 rounded-md border border-accent/40 bg-accent/5">
+                  <p className="text-[12px] font-semibold text-accent-dark mb-2">Provide Resolution Proof</p>
+                  
+                  <div className="flex gap-2 mb-3">
+                    <button
+                      type="button"
+                      onClick={() => setCaptureMode("upload")}
+                      className={`flex-1 rounded-md py-1.5 text-[12px] font-medium transition ${captureMode === "upload" ? "bg-accent text-white" : "bg-white text-ink-600 border border-line hover:bg-paper"}`}
+                    >
+                      Upload File
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setCaptureMode("camera")}
+                      className={`flex-1 rounded-md py-1.5 text-[12px] font-medium flex justify-center items-center gap-1 transition ${captureMode === "camera" ? "bg-accent text-white" : "bg-white text-ink-600 border border-line hover:bg-paper"}`}
+                    >
+                      <Camera size={14} /> Live Camera
+                    </button>
+                  </div>
+
+                  {captureMode === "upload" ? (
+                    <div>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={(e) => setResolveImage(e.target.files[0])}
+                        className="block w-full text-[12px] text-ink-500 file:mr-3 file:cursor-pointer file:rounded-md file:border-0 file:bg-accent file:px-3 file:py-1.5 file:text-[12px] file:font-medium file:text-white hover:file:bg-accent-dark"
+                      />
+                      {resolveImage && <p className="mt-2 text-[11px] font-medium text-success">File attached: {resolveImage.name}</p>}
+                    </div>
+                  ) : (
+                    <div className="flex flex-col gap-2">
+                      <div className="rounded-md overflow-hidden bg-black aspect-video relative">
+                         <Webcam
+                            audio={false}
+                            ref={webcamRef}
+                            screenshotFormat="image/jpeg"
+                            videoConstraints={{ facingMode: "environment" }}
+                            className="h-full w-full object-cover"
+                          />
+                      </div>
+                      <Button
+                        type="button"
+                        onClick={captureAndVerifyLocation}
+                        disabled={updating}
+                        className="w-full text-[12px] py-1.5"
+                      >
+                        {updating ? "Verifying Location..." : "Capture & Verify Location"}
+                      </Button>
+                    </div>
+                  )}
+
+                  <p className="mt-3 text-[11px] text-ink-500">
+                    AI will verify if the issue appears resolved based on this image before updating the status. Live camera verifies you are within 500m of the original issue.
+                  </p>
+                </div>
+              )}
             </div>
 
             <div className="mt-4 rounded border border-line/80 bg-white p-3 text-[11px] leading-relaxed text-ink-500">

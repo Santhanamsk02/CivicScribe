@@ -15,7 +15,14 @@ import { findMissingInfo, generateDraft, ApiError } from "../api/client.js";
 
 export default function Details() {
   const { facts, analysis, missingInfo, update } = useRequest();
-  const [localFacts, setLocalFacts] = useState(facts || {});
+  const [localFacts, setLocalFacts] = useState(() => {
+    const f = { ...facts };
+    const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+    if (!f.previous_complaint_date || !dateRegex.test(f.previous_complaint_date)) {
+      f.previous_complaint_date = new Date().toLocaleDateString('en-CA'); // en-CA gives YYYY-MM-DD
+    }
+    return f;
+  });
   const [missingQuestions, setMissingQuestions] = useState(
     missingInfo?.questions || []
   );

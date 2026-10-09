@@ -14,6 +14,16 @@ import Cases from "./pages/Cases.jsx";
 import HowItWorks from "./pages/HowItWorks.jsx";
 import OfficerDashboard from "./pages/OfficerDashboard.jsx";
 import OfficerCaseDetail from "./pages/OfficerCaseDetail.jsx";
+import OfficerSettings from "./pages/OfficerSettings.jsx";
+import Login from "./pages/Login.jsx";
+
+function RequireRole({ role, children }) {
+  const currentRole = localStorage.getItem("userRole");
+  if (currentRole !== role) {
+    return <Navigate to="/login" replace />;
+  }
+  return children;
+}
 
 function RequireStart({ children }) {
   const { originalText } = useRequest();
@@ -52,51 +62,32 @@ export default function App() {
       <div className="flex-1">
         <Routes>
           <Route path="/" element={<Home />} />
-          <Route path="/start" element={<Start />} />
-          <Route
-            path="/analyze"
-            element={
-              <RequireStart>
-                <Analyze />
-              </RequireStart>
-            }
-          />
-          <Route
-            path="/details"
-            element={
-              <RequireAnalysis>
-                <Details />
-              </RequireAnalysis>
-            }
-          />
-          <Route
-            path="/draft"
-            element={
-              <RequireFacts>
-                <Draft />
-              </RequireFacts>
-            }
-          />
-          <Route
-            path="/review"
-            element={
-              <RequireDraft>
-                <Review />
-              </RequireDraft>
-            }
-          />
-          <Route path="/case/:caseNumber" element={<CaseCreated />} />
-          <Route path="/cases" element={<Cases />} />
+          <Route path="/login" element={<Login />} />
+          
+          {/* Civilian Protected Routes */}
+          <Route path="/start" element={<RequireRole role="CIVILIAN"><Start /></RequireRole>} />
+          <Route path="/analyze" element={<RequireRole role="CIVILIAN"><RequireStart><Analyze /></RequireStart></RequireRole>} />
+          <Route path="/details" element={<RequireRole role="CIVILIAN"><RequireAnalysis><Details /></RequireAnalysis></RequireRole>} />
+          <Route path="/draft" element={<RequireRole role="CIVILIAN"><RequireFacts><Draft /></RequireFacts></RequireRole>} />
+          <Route path="/review" element={<RequireRole role="CIVILIAN"><RequireDraft><Review /></RequireDraft></RequireRole>} />
+          <Route path="/cases" element={<RequireRole role="CIVILIAN"><Cases /></RequireRole>} />
+          <Route path="/case/:caseNumber" element={<RequireRole role="CIVILIAN"><CaseCreated /></RequireRole>} />
+          
+          {/* Officer Protected Routes */}
+          <Route path="/officer" element={<RequireRole role="OFFICER"><OfficerDashboard /></RequireRole>} />
+          <Route path="/officer/settings" element={<RequireRole role="OFFICER"><OfficerSettings /></RequireRole>} />
+          <Route path="/officer/cases/:caseNumber" element={<RequireRole role="OFFICER"><OfficerCaseDetail /></RequireRole>} />
+          
+          {/* Public / Unprotected */}
           <Route path="/how-it-works" element={<HowItWorks />} />
-          <Route path="/officer" element={<OfficerDashboard />} />
-          <Route path="/officer/cases/:caseNumber" element={<OfficerCaseDetail />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </div>
-      <footer className="border-t border-line py-4 text-center text-[12px] text-ink-400">
-        <span>The Grievance Scribe</span> &middot;{" "}
+      <footer className="border-t border-line py-4 text-center text-[12px] text-ink-400 flex items-center justify-center gap-2">
+        <span>The Grievance Scribe</span>
+        <span className="text-ink-300">&middot;</span>
         <Link to="/officer" className="hover:text-ink-700 hover:underline">
-          Officer access
+          Officer Access
         </Link>
       </footer>
     </div>

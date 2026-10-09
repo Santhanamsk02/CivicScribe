@@ -1,18 +1,18 @@
 from supabase import create_client
 
-from config import SUPABASE_URL, SUPABASE_KEY
+from config.settings import settings
 
 
-if not SUPABASE_URL:
+if not settings.supabase_url:
     raise ValueError("SUPABASE_URL is not configured")
 
-if not SUPABASE_KEY:
+if not settings.supabase_key:
     raise ValueError("SUPABASE_KEY is not configured")
 
 
 supabase = create_client(
-    SUPABASE_URL,
-    SUPABASE_KEY
+    settings.supabase_url,
+    settings.supabase_key
 )
 
 

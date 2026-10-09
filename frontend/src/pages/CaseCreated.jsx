@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate, useParams, Link } from "react-router-dom";
-import { ChevronDown, ChevronUp, FileSearch } from "lucide-react";
+import { ChevronDown, ChevronUp, FileSearch, CheckCircle2 } from "lucide-react";
 import PageContainer from "../components/PageContainer.jsx";
 import Card from "../components/Card.jsx";
 import Badge from "../components/Badge.jsx";
@@ -38,7 +38,6 @@ export default function CaseCreated() {
   const navigate = useNavigate();
 
   useEffect(() => {
-    if (record && record.case_number === caseNumber && record.original_request) return;
     let active = true;
     if (!record) setLoading(true);
     setNotFound(false);
@@ -106,10 +105,33 @@ export default function CaseCreated() {
       </div>
 
       <Card className="mt-6">
-        <p className="text-[13px] font-medium text-ink-500">Case number</p>
-        <p className="mt-1 text-[26px] font-semibold tracking-tight text-ink-900">
-          {record.case_number}
-        </p>
+        <p className="mb-4 text-[13px] font-medium text-ink-500">Case status</p>
+        <CaseTimeline status={record.status} />
+      </Card>
+
+      <Card className="mt-5">
+        <div className="flex items-start justify-between">
+          <div>
+            <p className="text-[13px] font-medium text-ink-500">Case number</p>
+            <p className="mt-1 text-[26px] font-semibold tracking-tight text-ink-900">
+              {record.case_number}
+            </p>
+          </div>
+          <Button 
+            variant="secondary" 
+            size="sm" 
+            onClick={() => {
+              setLoading(true);
+              getCase(caseNumber)
+                .then(data => { setRecord(data); update({ caseRecord: data }); })
+                .catch(err => console.error(err))
+                .finally(() => setLoading(false));
+            }}
+            disabled={loading}
+          >
+            Refresh Status
+          </Button>
+        </div>
 
         <div className="mt-4 flex flex-wrap items-center gap-3">
           <Badge tone="accent">{record.status}</Badge>
@@ -135,10 +157,39 @@ export default function CaseCreated() {
         </div>
       </Card>
 
-      <Card className="mt-5">
-        <p className="mb-4 text-[13px] font-medium text-ink-500">Case status</p>
-        <CaseTimeline status={record.status} />
-      </Card>
+      {record.extracted_facts?.resolved_image_url && (
+        <Card className="mt-5 border-success/30 bg-success/5">
+          <div className="flex items-center gap-2 border-b border-success/20 pb-3">
+            <CheckCircle2 size={16} className="text-success" />
+            <h2 className="text-[15px] font-semibold text-ink-900">
+              Resolution Proof
+            </h2>
+          </div>
+          
+          <div className="mt-4 grid gap-4 sm:grid-cols-2">
+            <div>
+              <p className="text-[12px] font-medium uppercase tracking-wide text-ink-400 mb-2">
+                Resolved Status Photo
+              </p>
+              <img src={record.extracted_facts.resolved_image_url} alt="Resolution" className="w-full rounded-md border border-line" />
+            </div>
+            
+            {record.extracted_facts.resolution_verification && (
+              <div>
+                <p className="text-[12px] font-medium uppercase tracking-wide text-ink-400 mb-2">
+                  AI Verification
+                </p>
+                <div className="rounded border border-success/30 bg-white p-3 text-[13px] leading-relaxed text-ink-700">
+                  <p className="font-semibold text-success mb-1 flex items-center gap-1">
+                    <CheckCircle2 size={14} /> Verified Resolved
+                  </p>
+                  <p className="mt-1">{record.extracted_facts.resolution_verification.reason}</p>
+                </div>
+              </div>
+            )}
+          </div>
+        </Card>
+      )}
 
       <Card className="mt-5">
         <button

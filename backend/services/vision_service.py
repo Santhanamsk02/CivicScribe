@@ -134,7 +134,9 @@ Required structure:
     "consistency_score": 0,
     "consistency_status": "consistent",
     "consistency_explanation": "...",
-    "confidence": 0
+    "confidence": 0,
+    "severity_score": 0,
+    "severity_reason": "..."
 }
 
 Allowed relevance values:
@@ -177,6 +179,7 @@ Determine:
 4. Whether the image is visually consistent with
    the complaint.
 5. How confident you are in the visual assessment.
+6. Assess the severity of the issue based on the image (0-100) and provide a reason.
 
 Return ONLY the required JSON.
 """
@@ -271,6 +274,8 @@ Return ONLY the required JSON.
         "consistency_explanation",
 
         "confidence",
+        "severity_score",
+        "severity_reason"
     ]
 
     for field in required_fields:
@@ -330,6 +335,10 @@ Return ONLY the required JSON.
             result["confidence"]
         )
 
+        severity_score = float(
+            result["severity_score"]
+        )
+
     except (
         TypeError,
         ValueError,
@@ -357,6 +366,12 @@ Return ONLY the required JSON.
             "Image confidence must be between 0 and 100."
         )
 
+    if not 0 <= severity_score <= 100:
+
+        raise ValueError(
+            "Severity score must be between 0 and 100."
+        )
+
     # =====================================================
     # NORMALIZE RESULT
     # =====================================================
@@ -366,6 +381,8 @@ Return ONLY the required JSON.
     result["consistency_score"] = consistency_score
 
     result["confidence"] = confidence
+
+    result["severity_score"] = severity_score
 
     if not isinstance(
         result["detected_objects"],
@@ -377,3 +394,45 @@ Return ONLY the required JSON.
         ]
 
     return result
+
+def verify_resolution(
+    complaint_text: str,
+    original_image_url: str,
+    resolved_image_url: str
+) -> dict[str, Any]:
+    system_prompt = """
+You are a civic compliance verification AI. 
+You will be provided with:
+1. The original citizen complaint text.
+2. The original image of the issue (if available).
+3. The new 'resolved' image submitted by an officer.
+
+Your task is to determine whether the visual evidence in the 'resolved' image convincingly shows that the civic issue described in the complaint has been addressed or repaired.
+
+Return ONLY valid JSON in this exact format:
+{
+    "resolved": true or false,
+    "confidence_score": 0-100,
+    "reason": "Explain why the issue appears resolved or not, comparing the two images if applicable."
+}
+"""
+    user_prompt = f"Complaint Text:\n{complaint_text}\n\nPlease analyze the provided images and verify if the issue is resolved."
+    
+    content_list = [{"type": "text", "text": user_prompt}]
+    if original_image_url:
+        content_list.append({"type": "image_url", "image_url": {"url": original_image_url}})
+    content_list.append({"type": "image_url", "image_url": {"url": resolved_image_url}})
+
+    client = get_groq_client()
+    response = client.chat.completions.create(
+        model=settings.groq_vision_model,
+        temperature=0.1,
+        response_format={"type": "json_object"},
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": content_list}
+        ],
+    )
+    
+    content = response.choices[0].message.content or ""
+    return _extract_json(content)

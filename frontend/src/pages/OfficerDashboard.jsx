@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useMemo } from "react";
 import { Link } from "react-router-dom";
-import { Search, ShieldAlert, FolderOpen, RefreshCw, ArrowRight } from "lucide-react";
+import { Search, ShieldAlert, FolderOpen, RefreshCw, ArrowRight, Map, List } from "lucide-react";
 import PageContainer from "../components/PageContainer.jsx";
 import Card from "../components/Card.jsx";
 import Badge from "../components/Badge.jsx";
@@ -9,6 +9,17 @@ import LoadingState from "../components/LoadingState.jsx";
 import ErrorState from "../components/ErrorState.jsx";
 import EmptyState from "../components/EmptyState.jsx";
 import { getAllCases, ApiError } from "../api/client.js";
+import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
+import "leaflet/dist/leaflet.css";
+import L from "leaflet";
+
+// Fix Leaflet's default icon path issues with Webpack/Vite
+delete L.Icon.Default.prototype._getIconUrl;
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png",
+  iconUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png",
+  shadowUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png",
+});
 
 function formatDate(value) {
   if (!value) return "—";
@@ -44,6 +55,9 @@ export default function OfficerDashboard() {
   const [cases, setCases] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  
+  // View mode
+  const [viewMode, setViewMode] = useState("map"); // "map" or "list"
 
   // Filters
   const [searchQuery, setSearchQuery] = useState("");
@@ -123,15 +137,32 @@ export default function OfficerDashboard() {
           </p>
         </div>
 
-        <Button
-          variant="secondary"
-          className="text-[13px]"
-          onClick={fetchCases}
-          disabled={loading}
-        >
-          <RefreshCw size={14} className={loading ? "animate-spin" : ""} />
-          Refresh Cases
-        </Button>
+        <div className="flex items-center gap-3">
+          <div className="flex bg-paper border border-line rounded-md p-1">
+            <button 
+              onClick={() => setViewMode("map")}
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-sm text-[13px] font-medium transition ${viewMode === "map" ? "bg-white shadow-sm text-ink-900" : "text-ink-500 hover:text-ink-700"}`}
+            >
+              <Map size={14} /> Map
+            </button>
+            <button 
+              onClick={() => setViewMode("list")}
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-sm text-[13px] font-medium transition ${viewMode === "list" ? "bg-white shadow-sm text-ink-900" : "text-ink-500 hover:text-ink-700"}`}
+            >
+              <List size={14} /> List
+            </button>
+          </div>
+          
+          <Button
+            variant="secondary"
+            className="text-[13px]"
+            onClick={fetchCases}
+            disabled={loading}
+          >
+            <RefreshCw size={14} className={loading ? "animate-spin" : ""} />
+            Refresh
+          </Button>
+        </div>
       </div>
 
       {loading ? (
@@ -247,8 +278,55 @@ export default function OfficerDashboard() {
             </div>
           </div>
 
-          {/* Cases List */}
-          {filteredCases.length === 0 ? (
+          {/* Map View */}
+          {viewMode === "map" && (
+            <div className="mt-6 rounded-lg border border-line bg-white shadow-xs overflow-hidden" style={{ height: "400px", position: "relative" }}>
+              {typeof window !== "undefined" && (() => {
+                let mapCenter = [13.0827, 80.2707];
+                for (const c of filteredCases) {
+                  const lat = c.extracted_facts?.gps_location?.latitude || c.extracted_facts?.location?.latitude;
+                  const lng = c.extracted_facts?.gps_location?.longitude || c.extracted_facts?.location?.longitude;
+                  if (lat && lng) {
+                    mapCenter = [Number(lat), Number(lng)];
+                    break;
+                  }
+                }
+                return (
+                  <MapContainer center={mapCenter} zoom={13} style={{ height: "100%", width: "100%", zIndex: 10 }}>
+                    <TileLayer
+                      url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                      attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+                    />
+                  {filteredCases.map((c) => {
+                    const lat = c.extracted_facts?.gps_location?.latitude || c.extracted_facts?.location?.latitude; // fallback
+                    const lng = c.extracted_facts?.gps_location?.longitude || c.extracted_facts?.location?.longitude;
+                    if (lat && lng) {
+                      return (
+                        <Marker key={c.case_number} position={[Number(lat), Number(lng)]}>
+                          <Popup>
+                            <div className="text-[13px]">
+                              <strong className="block text-ink-900">{c.case_number}</strong>
+                              <span className="block text-ink-600 mt-1">{c.category || "General Issue"}</span>
+                              <Link to={`/officer/cases/${c.case_number}`} className="mt-2 inline-block font-medium text-accent hover:underline">
+                                View Case Details &rarr;
+                              </Link>
+                            </div>
+                          </Popup>
+                        </Marker>
+                      );
+                    }
+                    return null;
+                  })}
+                </MapContainer>
+                );
+              })()}
+            </div>
+          )}
+
+          {/* List View */}
+          {viewMode === "list" && (
+            <>
+              {filteredCases.length === 0 ? (
             <div className="mt-6 rounded-lg border border-line bg-white p-8 text-center">
               <p className="text-[15px] font-medium text-ink-900">No matching cases found.</p>
               <p className="mt-1 text-[13px] text-ink-500">
@@ -355,6 +433,8 @@ export default function OfficerDashboard() {
                   </Card>
                 ))}
               </div>
+            </>
+          )}
             </>
           )}
         </>
