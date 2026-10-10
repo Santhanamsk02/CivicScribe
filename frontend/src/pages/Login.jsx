@@ -7,8 +7,23 @@ import Card from "../components/Card.jsx";
 export default function Login() {
   const navigate = useNavigate();
 
-  const handleLogin = (role) => {
+  const handleLogin = async (role) => {
     localStorage.setItem("userRole", role);
+    
+    try {
+      const res = await fetch("http://127.0.0.1:8000/api/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ role })
+      });
+      if (res.ok) {
+        const profile = await res.json();
+        localStorage.setItem("userProfile", JSON.stringify(profile));
+      }
+    } catch (e) {
+      console.warn("Could not fetch profile", e);
+    }
+
     window.dispatchEvent(new Event("storage")); // Trigger event for Navbar to update
     if (role === "OFFICER") {
       navigate("/officer", { replace: true });

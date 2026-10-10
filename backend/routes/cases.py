@@ -103,7 +103,8 @@ def create_case(request: CreateCaseRequest):
         "category": request.category,
         "extracted_facts": request.extracted_facts.model_dump(),
         "draft": request.draft,
-        "status": "DRAFT"
+        "status": "DRAFT",
+        "applicant_details": request.applicant_details or {}
     }
 
     try:
@@ -252,6 +253,14 @@ def update_case_status(
                 status_code=404,
                 detail="Case not found"
             )
+            
+        updated_case = response.data[0]
+        
+        from services.notification_service import notify_citizen_status_change
+        try:
+            notify_citizen_status_change(updated_case, status)
+        except Exception as e:
+            print(f"Failed to notify citizen: {e}")
 
         return {
             "case_number": case_number,

@@ -4,10 +4,12 @@ import logging
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from email.mime.application import MIMEApplication
 from typing import Dict, Any
 
 from dotenv import dotenv_values
 from twilio.rest import Client
+from fpdf import FPDF
 
 PROFILE_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "officer_profile.json")
 ENV_PATH = os.path.join(os.path.dirname(__file__), "..", ".env")
@@ -22,18 +24,35 @@ def get_env_config():
     return dotenv_values(ENV_PATH)
 
 
+from services.supabase_service import test_supabase_connection
+
 def get_officer_profile() -> Dict[str, Any]:
-    if os.path.exists(PROFILE_PATH):
-        with open(PROFILE_PATH, "r") as f:
-            return json.load(f)
+    try:
+        supabase = test_supabase_connection()
+        response = supabase.table("profiles").select("*").eq("role", "OFFICER").single().execute()
+        if response.data:
+            return response.data
+    except Exception as e:
+        logger.error(f"Could not fetch officer profile from Supabase: {e}")
+        
+    # Ultimate Fallback
     return {
-        "name": "Officer Default",
-        "email": "officer@civicscribe.local",
-        "phone": "+91 9999999999",
+        "name": "Santa",
+        "email": "santhanakrishnan9360@gmail.com",
+        "phone": "+919344088926",
         "designation": "City Administrator"
     }
 
 def update_officer_profile(data: Dict[str, Any]) -> Dict[str, Any]:
+    try:
+        supabase = test_supabase_connection()
+        response = supabase.table("profiles").update(data).eq("role", "OFFICER").execute()
+        if response.data:
+            return response.data[0]
+    except Exception as e:
+        logger.error(f"Could not update officer profile in Supabase: {e}")
+        
+    # Fallback to local
     with open(PROFILE_PATH, "w") as f:
         json.dump(data, f, indent=4)
     return data
@@ -135,12 +154,63 @@ EVIDENCE / DOCUMENT:
             
         msg.attach(MIMEText(body, 'plain'))
         
+        draft_text = case_data.get("draft")
+        if draft_text:
+            pdf = FPDF(format="A4")
+            pdf.add_page()
+            
+            # Header Title
+            pdf.set_font("Helvetica", style="B", size=22)
+            pdf.set_text_color(15, 23, 42) # ink-900
+            pdf.cell(0, 10, "CivicScribe Official Document", ln=True, align='C')
+            
+            # Subheader
+            pdf.set_font("Helvetica", style="I", size=11)
+            pdf.set_text_color(100, 116, 139) # ink-500
+            pdf.cell(0, 6, f"Automated {request_type.capitalize()} Draft", ln=True, align='C')
+            
+            # Divider Line
+            pdf.set_draw_color(226, 232, 240) # line color
+            pdf.set_line_width(0.5)
+            pdf.line(20, 32, 190, 32)
+            pdf.ln(15)
+            
+            # Case Metadata block (Top Right)
+            pdf.set_font("Helvetica", style="B", size=10)
+            pdf.set_text_color(51, 65, 85)
+            pdf.cell(0, 6, f"CASE NUMBER: {case_number}", ln=True, align='R')
+            pdf.cell(0, 6, f"CATEGORY: {category.upper()}", ln=True, align='R')
+            pdf.ln(10)
+            
+            # Main Draft Content (simulating paper padding)
+            pdf.set_font("Helvetica", size=11)
+            pdf.set_text_color(15, 23, 42)
+            
+            # fpdf2 multi_cell wrapping. Latin-1 encode to prevent character errors.
+            clean_text = draft_text.encode('latin-1', 'replace').decode('latin-1')
+            
+            pdf.set_left_margin(25)
+            pdf.set_right_margin(25)
+            pdf.multi_cell(0, 7, txt=clean_text)
+            
+            # Footer
+            pdf.set_y(-25)
+            pdf.set_font("Helvetica", style="I", size=9)
+            pdf.set_text_color(148, 163, 184)
+            pdf.cell(0, 10, "Generated autonomously by CivicScribe AI Platform", align='C')
+            
+            pdf_bytes = pdf.output()
+            
+            pdf_attachment = MIMEApplication(pdf_bytes, _subtype="pdf")
+            pdf_attachment.add_header('Content-Disposition', f'attachment; filename="CivicScribe_{case_number}.pdf"')
+            msg.attach(pdf_attachment)
+        
         server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
         server.starttls()
         server.login(SMTP_USERNAME, SMTP_PASSWORD)
         server.send_message(msg)
         server.quit()
-        logger.info(f"✅ Real Email sent successfully to {profile['email']}")
+        logger.info(f"✅ Real Email sent successfully to {profile['email']} with attached PDF Draft")
     except Exception as e:
         logger.error(f"❌ Failed to send real email: {e}")
 
@@ -197,4 +267,79 @@ def _make_urgent_call(profile, case_number, category):
         logger.info(f"✅ Real Voice Call dispatched to {profile['phone']}, SID: {call.sid}")
     except Exception as e:
         logger.error(f"❌ Failed to make real call: {e}")
+
+def notify_citizen_status_change(case_data: Dict[str, Any], new_status: str):
+    config = get_env_config()
+    TWILIO_ACCOUNT_SID = config.get("TWILIO_ACCOUNT_SID")
+    TWILIO_AUTH_TOKEN = config.get("TWILIO_AUTH_TOKEN")
+    TWILIO_PHONE_NUMBER = config.get("TWILIO_PHONE_NUMBER")
+    
+    SMTP_USERNAME = config.get("SMTP_USERNAME")
+    SMTP_PASSWORD = config.get("SMTP_PASSWORD")
+    SMTP_SERVER = config.get("SMTP_SERVER", "smtp.gmail.com")
+    SMTP_PORT = int(config.get("SMTP_PORT", 587))
+    
+    applicant = case_data.get("applicant_details", {})
+    citizen_phone = applicant.get("phone")
+    citizen_email = applicant.get("email")
+    citizen_name = applicant.get("fullName", "Citizen")
+    case_number = case_data.get("case_number", "UNKNOWN")
+    
+    # Send SMS
+    if citizen_phone:
+        if not TWILIO_ACCOUNT_SID or not TWILIO_AUTH_TOKEN or not TWILIO_PHONE_NUMBER:
+            logger.info("=" * 60)
+            logger.info(f"📱 [MOCK SMS] To Citizen: {citizen_phone}")
+            logger.info(f"Message: CivicScribe Update: Your case {case_number} status has been updated to {new_status}.")
+            logger.info("=" * 60)
+        else:
+            try:
+                client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
+                message = client.messages.create(
+                    body=f"CivicScribe Update: Your case {case_number} status has been updated to {new_status}.",
+                    from_=TWILIO_PHONE_NUMBER,
+                    to=citizen_phone
+                )
+                logger.info(f"✅ Real SMS dispatched to Citizen {citizen_phone}, SID: {message.sid}")
+            except Exception as e:
+                logger.error(f"❌ Failed to send citizen SMS: {e}")
+
+    # Send Email
+    if citizen_email:
+        if not SMTP_USERNAME or not SMTP_PASSWORD:
+            logger.info("=" * 60)
+            logger.info(f"📧 [MOCK EMAIL] To Citizen: {citizen_email}")
+            logger.info(f"Subject: CivicScribe Case Update - {case_number}")
+            logger.info(f"Body: Dear {citizen_name}, your case {case_number} is now {new_status}.")
+            logger.info("=" * 60)
+        else:
+            try:
+                msg = MIMEMultipart()
+                msg['From'] = SMTP_USERNAME
+                msg['To'] = citizen_email
+                msg['Subject'] = f"CivicScribe Case Update - {case_number}"
+                
+                body = f"""Dear {citizen_name},
+                
+This is an automated notification from CivicScribe. 
+
+The status of your civic request (Case Number: {case_number}) has been updated.
+
+New Status: {new_status}
+
+You can track your case progress on the CivicScribe portal.
+
+Thank you,
+CivicScribe Administration
+"""
+                msg.attach(MIMEText(body, 'plain'))
+                
+                server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
+                server.starttls()
+                server.login(SMTP_USERNAME, SMTP_PASSWORD)
+                server.send_message(msg)
+                server.quit()
+                logger.info(f"✅ Real Email dispatched to Citizen {citizen_email}")
+            except Exception as e:
+                logger.error(f"❌ Failed to send citizen Email: {e}")
 

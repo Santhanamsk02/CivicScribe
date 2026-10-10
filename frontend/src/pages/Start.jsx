@@ -22,6 +22,9 @@ export default function Start() {
   const navigate = useNavigate();
   const webcamRef = useRef(null);
 
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const fileInputRef = useRef(null);
+
   const processAndUpload = async (imageSrc, latitude, longitude) => {
     return new Promise((resolve, reject) => {
       const img = new Image();
@@ -47,26 +50,30 @@ export default function Start() {
     });
   };
 
-  const handleCaptureAndContinue = async () => {
+  const getLocation = async () => {
+    return new Promise((resolve) => {
+      if (!navigator.geolocation) {
+        resolve({ lat: 13.0827, lng: 80.2707 }); // Fallback to Chennai
+        return;
+      }
+      navigator.geolocation.getCurrentPosition(
+        (pos) => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+        (err) => {
+          console.warn("Location access denied or failed. Using fallback.", err);
+          resolve({ lat: 13.0827, lng: 80.2707 }); // Fallback location so demo always works
+        },
+        { enableHighAccuracy: true, timeout: 20000, maximumAge: 10000 }
+      );
+    });
+  };
+
+  const submitImage = async (imageSrc) => {
     const trimmed = text.trim();
     if (!trimmed) return;
     setLoading(true);
     setError(null);
     try {
-      const imageSrc = webcamRef.current.getScreenshot();
-      if (!imageSrc) throw new Error("Could not capture image.");
-
-      // Get location
-      let lat = null, lng = null;
-      try {
-        const pos = await new Promise((resolve, reject) => {
-          navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 });
-        });
-        lat = pos.coords.latitude;
-        lng = pos.coords.longitude;
-      } catch (err) {
-        console.warn("Location access denied or failed.");
-      }
+      const { lat, lng } = await getLocation();
 
       const imageBlob = await processAndUpload(imageSrc, lat, lng);
       const result = await analyzeRequestWithImage(trimmed, imageBlob, lat, lng);
@@ -76,7 +83,7 @@ export default function Start() {
         analysis: result.analysis,
         image_url: result.image_url,
         vision_result: result.vision_result,
-        location: result.location,
+        location: { lat, lng },
         facts: null,
         missingInfo: null,
         draft: null,
@@ -87,7 +94,32 @@ export default function Start() {
     } finally {
       setLoading(false);
       setShowCamera(false);
+      setUploadingImage(false);
     }
+  };
+
+  const handleCaptureAndContinue = async () => {
+    const imageSrc = webcamRef.current.getScreenshot();
+    if (!imageSrc) {
+      setError("Could not capture image.");
+      return;
+    }
+    await submitImage(imageSrc);
+  };
+
+  const handleFileUpload = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadingImage(true);
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      await submitImage(event.target.result);
+    };
+    reader.onerror = () => {
+      setError("Failed to read file.");
+      setUploadingImage(false);
+    };
+    reader.readAsDataURL(file);
   };
 
   const handleContinueWithoutImage = async () => {
@@ -100,10 +132,13 @@ export default function Start() {
     setLoading(true);
     setError(null);
     try {
+      const { lat, lng } = await getLocation();
       const result = await analyzeRequest(trimmed);
+      
       update({
         originalText: trimmed,
         analysis: result,
+        location: { lat, lng },
         facts: null,
         missingInfo: null,
         draft: null,
@@ -170,6 +205,23 @@ export default function Start() {
             <Camera size={14} />
             Open Camera
           </button>
+          
+          <input 
+            type="file"
+            accept="image/*"
+            ref={fileInputRef}
+            onChange={handleFileUpload}
+            className="hidden"
+          />
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            className="inline-flex items-center gap-2 rounded-md border border-line bg-white px-4 py-2 text-[14px] text-ink-700 hover:bg-slate-50 cursor-pointer"
+          >
+            <MapPin size={14} />
+            Upload Image
+          </button>
+
           <button
             type="button"
             disabled
@@ -189,13 +241,13 @@ export default function Start() {
         </div>
       )}
 
-      {loading && (
+      {(loading || uploadingImage) && (
         <div className="mt-6">
-          <LoadingState message="Understanding your request..." />
+          <LoadingState message="Fetching accurate location & analyzing image..." />
         </div>
       )}
 
-      {!loading && !showCamera && (
+      {!loading && !uploadingImage && !showCamera && (
         <div className="mt-8 flex items-center justify-between">
           <p className="max-w-[320px] text-[13px] text-ink-500">
             Next, we will capture a photo of the issue for severity assessment before proceeding.

@@ -13,6 +13,7 @@ from routes.draft import router as draft_router
 from routes.cases import router as cases_router
 from routes.validation import router as validation_router
 from routes.profile import router as profile_router
+from routes.auth import router as auth_router
 
 app = FastAPI(
     title=settings.app_name,
@@ -65,6 +66,11 @@ app.include_router(
 
 app.include_router(
     profile_router,
+    prefix="/api"
+)
+
+app.include_router(
+    auth_router,
     prefix="/api"
 )
 

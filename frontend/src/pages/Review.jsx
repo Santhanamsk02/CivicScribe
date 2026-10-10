@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { ShieldCheck } from "lucide-react";
+import { ShieldCheck, MapPin } from "lucide-react";
 import PageContainer from "../components/PageContainer.jsx";
 import StepIndicator from "../components/StepIndicator.jsx";
 import Card from "../components/Card.jsx";
@@ -27,23 +27,92 @@ export default function Review() {
     rememberCaseNumber,
   } = useRequest();
   const [confirmed, setConfirmed] = useState(false);
-  const [details, setDetails] = useState(
-    applicantDetails || {
+  const getInitialDetails = () => {
+    if (applicantDetails) return applicantDetails;
+    try {
+      const stored = localStorage.getItem("userProfile");
+      if (stored) {
+        const profile = JSON.parse(stored);
+        return {
+          fullName: profile.name || "",
+          address: profile.address || "",
+          phone: profile.phone || "",
+          email: profile.email || "",
+        };
+      }
+    } catch (e) {}
+    
+    return {
       fullName: "",
       address: "",
       phone: "",
       email: "",
-    }
-  );
+    };
+  };
+
+  const [details, setDetails] = useState(getInitialDetails());
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [nearbyOffice, setNearbyOffice] = useState(null);
   const navigate = useNavigate();
+  
+  // Use a fallback key or environment variable. 
+  // (In production, use VITE_GEOAPIFY_API_KEY from .env)
+  const GEOAPIFY_KEY = import.meta.env.VITE_GEOAPIFY_API_KEY || "4f8866563f30465a981a5cb36601e8ff";
 
   useEffect(() => {
     if (!draft || !analysis?.type) {
       navigate("/start", { replace: true });
     }
-  }, [draft, analysis, navigate]);
+    
+    const fetchProfile = async () => {
+      try {
+        const res = await fetch("http://127.0.0.1:8000/api/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ role: "CIVILIAN" })
+        });
+        if (res.ok) {
+          const profile = await res.json();
+          setDetails((prev) => ({
+            ...prev,
+            fullName: prev.fullName || profile.name || "",
+            address: prev.address || profile.address || "",
+            phone: prev.phone || profile.phone || "",
+            email: prev.email || profile.email || "",
+          }));
+        }
+      } catch (e) {
+        console.warn("Could not fetch citizen profile", e);
+      }
+    };
+    
+    if (!details.fullName || !details.phone) {
+      fetchProfile();
+    }
+  }, [draft, analysis, navigate, details.fullName, details.phone]);
+
+  useEffect(() => {
+    const fetchNearbyOffice = async () => {
+      // Ensure we have coordinates (either from context or fallback to Chennai demo coordinates)
+      const lat = location?.lat || 13.0827;
+      const lon = location?.lng || 80.2707;
+      
+      try {
+        const url = `https://api.geoapify.com/v2/places?categories=office.government&filter=circle:${lon},${lat},10000&bias=proximity:${lon},${lat}&limit=1&apiKey=${GEOAPIFY_KEY}`;
+        const res = await fetch(url);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.features && data.features.length > 0) {
+            setNearbyOffice(data.features[0].properties);
+          }
+        }
+      } catch (err) {
+        console.warn("Failed to fetch nearby office", err);
+      }
+    };
+    fetchNearbyOffice();
+  }, [location, GEOAPIFY_KEY]);
 
   const canSubmit =
     confirmed &&
@@ -132,6 +201,21 @@ export default function Review() {
           </p>
         </Card>
 
+        {image_url && (
+          <Card>
+            <p className="text-[13px] font-medium text-ink-500">
+              Uploaded Evidence
+            </p>
+            <div className="mt-3 overflow-hidden rounded-md border border-line flex justify-center bg-gray-50">
+              <img 
+                src={image_url} 
+                alt="Complaint Evidence" 
+                className="w-full h-auto max-h-[400px] object-contain" 
+              />
+            </div>
+          </Card>
+        )}
+
         <Card>
           <div className="flex items-center justify-between">
             <p className="text-[13px] font-medium text-ink-500">Application</p>
@@ -153,6 +237,61 @@ export default function Review() {
             </div>
           </div>
         </Card>
+
+        {nearbyOffice && (() => {
+          const userLon = location?.lng || 80.2707;
+          const userLat = location?.lat || 13.0827;
+          const offLon = nearbyOffice.lon;
+          const offLat = nearbyOffice.lat;
+          
+          // Generate a Google Maps Embed URL to show the real interactive map and place card (with photo)
+          const searchQuery = encodeURIComponent(`${nearbyOffice.name || 'Government Office'} ${nearbyOffice.formatted}`);
+          const googleMapUrl = `https://maps.google.com/maps?q=${searchQuery}&t=&z=15&ie=UTF8&iwloc=&output=embed`;
+          
+          return (
+            <Card>
+              <div className="flex items-start gap-3">
+                <MapPin size={18} className="mt-0.5 text-accent" aria-hidden="true" />
+                <div className="w-full">
+                  <p className="text-[13px] font-medium text-ink-500">Routing to Responsible Authority</p>
+                  <p className="mt-1 text-[15px] font-semibold text-ink-900">
+                    {nearbyOffice.name || nearbyOffice.address_line1 || "Municipal Corporation Office"}
+                  </p>
+                  
+                  <div className="mt-1 flex flex-col gap-1 text-[13px] text-ink-500">
+                    <p>{nearbyOffice.formatted}</p>
+                    
+                    {/* Distance and Phone */}
+                    <div className="flex items-center gap-4 mt-2">
+                      {nearbyOffice.distance && (
+                        <span className="font-medium text-ink-900">
+                          Distance: {(nearbyOffice.distance / 1000).toFixed(2)} km
+                        </span>
+                      )}
+                      <span className="font-medium text-ink-900">
+                        Phone: {nearbyOffice.contact?.phone || "044-25384510"}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Google Maps Interactive Container */}
+                  <div className="mt-4 overflow-hidden rounded-md border border-line resize-y min-h-[250px] h-[300px] relative">
+                    <iframe
+                      src={googleMapUrl}
+                      className="w-full h-full absolute top-0 left-0"
+                      frameBorder="0"
+                      scrolling="no"
+                      marginHeight="0"
+                      marginWidth="0"
+                      title="Google Maps Location"
+                    ></iframe>
+                  </div>
+                  <p className="text-xs text-ink-400 mt-1">Interactive Google Map: Click 'View larger map' to see full department photos and routing.</p>
+                </div>
+              </div>
+            </Card>
+          );
+        })()}
 
         <Card>
           <h2 className="text-[16px] font-semibold text-ink-900">
